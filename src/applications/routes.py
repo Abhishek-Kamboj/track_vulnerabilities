@@ -1,18 +1,20 @@
-import json
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from redis.asyncio import Redis
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
-from src.logging_utils import logger
-from src.applications.schemas import ApplicationResponse
-from src.applications.services import fetch_vulnerabilities
-from src.applications.utils import parse_requirements
+from src.redis_utils import get_redis
+from src.applications.schemas import ApplicationResponse, ApplicationCreate
+from src.applications.services import ApplicationService, get_application_service
 from src.db.main import get_db
-from src.db.models import Application, Dependency
+from src.db.models import Application
+from src.logging_utils import logger
 
 application_router = APIRouter()
+
+MAX_FILE_SIZE_BYTES = 500 * 1024  # 500 * 1024 bytes , 500KB
 
 
 # Application Endpoints
@@ -26,93 +28,110 @@ async def create_application(
     description: Optional[str] = None,
     file: UploadFile = File(...),
     db_session: Session = Depends(get_db),
+    redis_client: Redis = Depends(get_redis),
+    appl_service: ApplicationService = Depends(get_application_service),
 ):
     """
     Create a new application with requirements.txt.
     """
-    name = name.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="Name is required")
-
+    # Since FastAPI doesn't handle mix of file upload and pydantic model as input
+    # Create pydantic model here.
     try:
-        if not (
-            db_session.query(Application).filter(Application.name == name).first()
-            is None
-        ):
-            raise HTTPException(status_code=422, detail="App already exists")
+        app_create = ApplicationCreate(name=name, description=description)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.json(include_url=False),
+        )
+
+    # Check file size before reading
+    if file.size is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to determine file size",
+        )
+    if file.size > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds limit of {MAX_FILE_SIZE_BYTES // 1024} KB",
+        )
+    try:
         content = await file.read()
         content_str = content.decode("utf-8")
-        deps = parse_requirements(content_str)
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid requirements.txt file")
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid requirements.txt file",
+        )
 
-    vulnerabilities = []
-    # first  Create application
-    new_app = Application(
-        name=name,
-        description=description,
-        is_vulnerable=False,
-        created_at=datetime.now(),
+    application = await appl_service.create_application(
+        app_create.name, app_create.description, content_str, db_session, redis_client
     )
-    try:
-        for dep in deps:
-            vulns = await fetch_vulnerabilities(dep["name"], dep["version"])
-            if vulns:
-                vulnerabilities.extend(vulns)
 
-            dep_id = f"{dep['name']}:{dep['version']}"
-            # Check if dependency exists
-            existing_dep = (
-                db_session.query(Dependency).filter(Dependency.id == dep_id).first()
-            )
-            if not existing_dep:
-                new_dep = Dependency(
-                    id=dep_id,
-                    name=dep["name"],
-                    version=dep["version"],
-                    vulnerabilities=json.dumps(vulns),
-                )
-                new_dep.applications.append(new_app)
-                db_session.add(new_dep)
-            else:
-                existing_dep.applications.append(new_app)
-        # update vulnerability status , now that all the dependencies have been added.
-        new_app.is_vulnerable = len(vulnerabilities) > 0
-        db_session.add(new_app)
-        db_session.commit()
-        db_session.refresh(new_app)
-        return new_app
-    except Exception as e:
-        db_session.rollback()
-        logger.error(f"Error creating application: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create application")
+    return application
 
 
-@application_router.delete(
-    "/{app_name}", status_code=status.HTTP_204_NO_CONTENT
-)
-async def delete_application(app_name: str, db_session: Session = Depends(get_db)):
-    """Delete an application and its associations with dependencies."""
-    name = name.strip()
-    try:
-        app = db_session.query(Application).filter(Application.name == app_name).first()
-        if not app:
-            raise HTTPException(status_code=404, detail="Application not found")
+@application_router.delete("/{app_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_application(
+    app_name: str,
+    db_session: Session = Depends(get_db),
+    redis_client: Redis = Depends(get_redis),
+    appl_service: ApplicationService = Depends(get_application_service),
+):
+    """
+    Delete an application.
+    """
+    app_name = app_name.strip()
+    if not app_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="app_name is required",
+        )
 
-        db_session.delete(app)
-        db_session.commit()
-        return {}
-    except Exception as e:
-        db_session.rollback()
-        logger.error(f"Error deleting application: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to delete application")
+    return appl_service.delete_application(app_name, db_session, redis_client)
 
 
 @application_router.get("/", response_model=List[ApplicationResponse])
 async def get_applications(db_session: Session = Depends(get_db)):
-    """List all applications."""
+    """
+    List all applications.
+    """
+    from asyncio import sleep
+    await sleep(10)
     try:
-        return db_session.query(Application).all()
+        apps: List[Application] = db_session.query(Application).all()
+        return [
+            ApplicationResponse(
+                name=app.name,
+                description=app.description,
+                is_vulnerable=app.is_vulnerable,
+                created_at=app.created_at,
+            )
+            for app in apps
+        ]
+    except Exception as e:
+        logger.error(f"Error retrieving applications: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve applications")
+
+
+@application_router.get("/{app_name}", response_model=List[ApplicationResponse])
+async def get_application(
+    app_name: str,
+    db_session: Session = Depends(get_db),
+    appl_service: ApplicationService = Depends(get_application_service),
+    redis_client: Redis = Depends(get_redis)
+    ):
+    """
+    get application by name.
+    """
+    app_name = app_name.strip()
+    if not app_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="app_name is required",
+        )
+    try:
+        return appl_service.get_application(app_name,db_session,redis_client)
     except Exception as e:
         logger.error(f"Error retrieving applications: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve applications")

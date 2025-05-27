@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
+from fastapi.responses import JSONResponse
 
 from src.logging_utils import logger
 from src.redis_utils import aioredis, redis_client, redis_pool
 from src.applications.routes import application_router
 from src.dependencies.routes import dependency_router
+from src.db.main import create_db
 
 
 version = "v1"
@@ -22,6 +24,8 @@ This REST API is able to;
 
 version_prefix = f"/api/{version}"
 
+create_db()
+logger.info("sqllite db tables created")
 
 @asynccontextmanager
 async def lifespan(_):
@@ -38,12 +42,12 @@ async def lifespan(_):
     except aioredis.RedisError as e:
         logger.error(f"Failed to connect to Redis: {str(e)}")
         raise RuntimeError("Redis connection failed")
-
-    yield
-
-    await redis_client.close()
-    await redis_pool.disconnect()
-    logger.info("Redis connection pool closed")
+    try:
+        yield
+    finally:
+        await redis_client.close()
+        await redis_pool.disconnect()
+        logger.info("Redis connection pool closed")
 
 
 app = FastAPI(
@@ -71,3 +75,8 @@ app.include_router(
 app.include_router(
     dependency_router, prefix=f"{version_prefix}/dependencies", tags=["dependencies"]
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Unexpected error: {str(exc)}")
+    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": "Internal server error"})
