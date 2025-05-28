@@ -1,11 +1,13 @@
-from typing import List
+from typing import List, Set
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from src.db.main import get_db
+from src.db.models import Dependency, User
 from src.dependencies.schemas import DependencyResponse
 from src.dependencies.services import DependencyService, get_dependency_service
+from src.logging_utils import logger
 
 dependency_router = APIRouter()
 
@@ -46,3 +48,20 @@ async def get_dependency(
         )
 
     return await dep_service.get_dependency(dep_id, db_session)
+
+
+@dependency_router.get("/byUser/{user_id}", response_model=List[DependencyResponse])
+async def get_user_dependencies(
+    user_id: str,
+    db_session: Session = Depends(get_db),
+    dep_service: DependencyService = Depends(get_dependency_service),
+):
+    """Get all dependencies for all applications associated with a user."""
+    user_id = user_id.strip()
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="dep_id is required",
+        )
+
+    return await dep_service.get_dependency_by_user(user_id, db_session)

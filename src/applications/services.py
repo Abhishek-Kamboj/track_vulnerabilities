@@ -8,14 +8,12 @@ from fastapi import HTTPException, status
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
+from src.app_constants import ECO_SYSTEM, OSV_SERVICE_URL
+from src.applications.schemas import ApplicationResponse
 from src.applications.utils import parse_requirements
-from src.db.models import Application, Dependency
+from src.db.models import Application, Dependency, User
 from src.logging_utils import logger
 from src.redis_utils import get_cache_ttl, set_cache_ttl
-from src.applications.schemas import ApplicationResponse
-
-OSV_SERVICE_URL: str = "https://api.osv.dev/v1/query"
-ECO_SYSTEM = "PyPI"
 
 
 class ApplicationService:
@@ -69,6 +67,7 @@ class ApplicationService:
         self,
         name: str,
         description: Optional[str],
+        user_id: str,
         file_content: str,
         db_session: Session,
         redis_client: Redis,
@@ -98,15 +97,20 @@ class ApplicationService:
             - 400 (Bad Request) if the requirements.txt file is invalid (e.g., Unicode decode error).
             - 500 (Internal Server Error) if an error occurs during database or vulnerability processing.
         """
+        if not db_session.query(User).filter(User.id == user_id).first():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="User doesn't exist",
+            )
+        if not (
+            db_session.query(Application).filter(Application.name == name).first()
+            is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="App already exists",
+            )
         try:
-            if not (
-                db_session.query(Application).filter(Application.name == name).first()
-                is None
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="App already exists",
-                )
             deps = parse_requirements(file_content)
         except UnicodeDecodeError:
             raise HTTPException(
@@ -118,6 +122,7 @@ class ApplicationService:
         # first create application
         new_app = Application(
             name=name,
+            user_id= user_id,
             description=description,
             is_vulnerable=False,
             created_at=datetime.now(),
@@ -223,6 +228,18 @@ class ApplicationService:
             )
 
             return app_response
+
+    async def get_applications(self,user_id: str, db_session: Session)-> ApplicationResponse:
+        apps: List[Application] = db_session.query(Application).filter(Application.user_id == user_id).all()
+        return [
+            ApplicationResponse(
+                name=app.name,
+                description=app.description,
+                is_vulnerable=app.is_vulnerable,
+                created_at=app.created_at,
+            )
+            for app in apps
+        ]
 
 
 appl_service = ApplicationService()

@@ -1,10 +1,10 @@
 import json
-from typing import List
+from typing import List, Set
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.db.models import Application, Dependency
+from src.db.models import Application, Dependency, User
 from src.dependencies.schemas import DependencyResponse
 from src.logging_utils import logger
 
@@ -42,7 +42,9 @@ class DependencyService:
                 detail="Failed to retrieve dependencies",
             )
 
-    async def get_dependency(self, dep_id: str, db_session: Session) -> DependencyResponse:
+    async def get_dependency(
+        self, dep_id: str, db_session: Session
+    ) -> DependencyResponse:
         """
         Get details for a specific dependency.
         """
@@ -65,6 +67,29 @@ class DependencyService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve dependency",
             )
+
+    async def get_dependency_by_user(self, user_id: str, db_session: Session):
+        user: User = db_session.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+
+        # Collect unique dependencies across all applications
+        unique_dependencies: Set[Dependency] = set()
+        for app in user.applications:  # lazy-loaded
+            for dep in app.dependencies:  # lazy-loaded
+                unique_dependencies.add(dep)
+
+        # Convert to DependencyResponse format
+        return [
+            {
+                "id": dep.id,
+                "name": dep.name,
+                "version": dep.version,
+                "applications": [app.name for app in dep.applications],  # lazy-loaded
+                "vulnerabilities": json.loads(dep.vulnerabilities),
+            }
+            for dep in unique_dependencies
+        ]
 
 
 dep_service = DependencyService()

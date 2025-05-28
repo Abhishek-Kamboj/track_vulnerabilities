@@ -25,6 +25,8 @@ class Application(Base):
     description = Column(Text, nullable=True)
     is_vulnerable = Column(Boolean, nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
+    user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    user: Mapped["User"] = relationship("User", back_populates="applications")
     dependencies: Mapped[List["Dependency"]] = relationship(
         "Dependency", secondary=app_dependencies, back_populates="applications"
     )
@@ -38,4 +40,13 @@ class Dependency(Base):
     vulnerabilities = Column(Text, nullable=False)
     applications: Mapped[List["Application"]] = relationship(
         "Application", secondary=app_dependencies, back_populates="dependencies"
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True)  # Unique identifier (e.g., email or username)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    applications: Mapped[List["Application"]] = relationship(
+        "Application", back_populates="user"
     )

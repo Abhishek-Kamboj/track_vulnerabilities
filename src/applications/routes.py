@@ -1,20 +1,19 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
-from pydantic import ValidationError
 
-from src.redis_utils import get_redis
-from src.applications.schemas import ApplicationResponse, ApplicationCreate
+from src.app_constants import MAX_FILE_SIZE_BYTES
+from src.applications.schemas import ApplicationCreate, ApplicationResponse
 from src.applications.services import ApplicationService, get_application_service
 from src.db.main import get_db
 from src.db.models import Application
 from src.logging_utils import logger
+from src.redis_utils import get_redis
 
 application_router = APIRouter()
-
-MAX_FILE_SIZE_BYTES = 500 * 1024  # 500 * 1024 bytes , 500KB
 
 
 # Application Endpoints
@@ -25,6 +24,7 @@ MAX_FILE_SIZE_BYTES = 500 * 1024  # 500 * 1024 bytes , 500KB
 )
 async def create_application(
     name: str,
+    user_id: str,
     description: Optional[str] = None,
     file: UploadFile = File(...),
     db_session: Session = Depends(get_db),
@@ -35,9 +35,11 @@ async def create_application(
     Create a new application with requirements.txt.
     """
     # Since FastAPI doesn't handle mix of file upload and pydantic model as input
-    # Create pydantic model here.
+    # we create pydantic model here.
     try:
-        app_create = ApplicationCreate(name=name, description=description)
+        app_create = ApplicationCreate(
+            name=name, description=description, user_id=user_id
+        )
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -65,7 +67,12 @@ async def create_application(
         )
 
     application = await appl_service.create_application(
-        app_create.name, app_create.description, content_str, db_session, redis_client
+        app_create.name,
+        app_create.description,
+        app_create.user_id,
+        content_str,
+        db_session,
+        redis_client,
     )
 
     return application
@@ -88,27 +95,26 @@ async def delete_application(
             detail="app_name is required",
         )
 
-    return appl_service.delete_application(app_name, db_session, redis_client)
+    return await appl_service.delete_application(app_name, db_session, redis_client)
 
 
-@application_router.get("/", response_model=List[ApplicationResponse])
-async def get_applications(db_session: Session = Depends(get_db)):
+@application_router.get("/{user_id}", response_model=List[ApplicationResponse])
+async def get_applications(
+    user_id: str,
+    db_session: Session = Depends(get_db),
+    appl_service: ApplicationService = Depends(get_application_service),
+):
     """
-    List all applications.
+    List all applications of the user.
     """
-    from asyncio import sleep
-    await sleep(10)
+    user_id = user_id.strip()
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="user_id is required",
+        )
     try:
-        apps: List[Application] = db_session.query(Application).all()
-        return [
-            ApplicationResponse(
-                name=app.name,
-                description=app.description,
-                is_vulnerable=app.is_vulnerable,
-                created_at=app.created_at,
-            )
-            for app in apps
-        ]
+        return await appl_service.get_applications(user_id, db_session)
     except Exception as e:
         logger.error(f"Error retrieving applications: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve applications")
@@ -119,8 +125,8 @@ async def get_application(
     app_name: str,
     db_session: Session = Depends(get_db),
     appl_service: ApplicationService = Depends(get_application_service),
-    redis_client: Redis = Depends(get_redis)
-    ):
+    redis_client: Redis = Depends(get_redis),
+):
     """
     get application by name.
     """
@@ -131,7 +137,7 @@ async def get_application(
             detail="app_name is required",
         )
     try:
-        return appl_service.get_application(app_name,db_session,redis_client)
+        return await appl_service.get_application(app_name, db_session, redis_client)
     except Exception as e:
         logger.error(f"Error retrieving applications: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve applications")
+        raise HTTPException(status_code=500, detail="Failed to retrieve application")
