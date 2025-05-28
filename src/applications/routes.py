@@ -96,7 +96,7 @@ async def delete_application(
     return await appl_service.delete_application(app_name, db_session, redis_client)
 
 
-@application_router.get("/{user_id}", response_model=List[ApplicationResponse])
+@application_router.get("/{user_id}/applications", response_model=List[ApplicationResponse])
 async def get_applications(
     user_id: str,
     db_session: Session = Depends(get_db),
@@ -121,7 +121,7 @@ async def get_applications(
         )
 
 
-@application_router.get("/{app_name}", response_model=List[ApplicationResponse])
+@application_router.get("/{app_name}", response_model=ApplicationResponse)
 async def get_application(
     app_name: str,
     db_session: Session = Depends(get_db),

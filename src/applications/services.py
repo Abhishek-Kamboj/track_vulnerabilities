@@ -158,10 +158,11 @@ class ApplicationService:
                 description=new_app.description,
                 is_vulnerable=new_app.is_vulnerable,
                 created_at=new_app.created_at,
+                user_id=new_app.user_id
             )
             cache_key = self.app_cache_key.format(new_app.name)
-            set_cache_ttl(
-                cache_key, json.dumps(app_response.model_dump_json()), redis_client, 30
+            await set_cache_ttl(
+                cache_key, app_response.model_dump_json(), redis_client, 30
             )
             return app_response
         except Exception as e:
@@ -251,9 +252,10 @@ class ApplicationService:
                 description=app.description,
                 is_vulnerable=app.is_vulnerable,
                 created_at=app.created_at,
+                user_id=app.user_id
             )
-            set_cache_ttl(
-                cache_key, json.dumps(app_response.model_dump_json()), redis_client, 30
+            await set_cache_ttl(
+                cache_key, app_response.model_dump_json(), redis_client, 30
             )
 
             return app_response
@@ -270,6 +272,7 @@ class ApplicationService:
                 description=app.description,
                 is_vulnerable=app.is_vulnerable,
                 created_at=app.created_at,
+                user_id=app.user_id
             )
             for app in apps
         ]

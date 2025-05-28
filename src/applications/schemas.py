@@ -47,3 +47,4 @@ class ApplicationResponse(BaseModel):
     description: Optional[str]
     is_vulnerable: bool
     created_at: datetime
+    user_id: str

@@ -62,7 +62,10 @@ class DependencyService:
         """
         dep = db_session.query(Dependency).filter(Dependency.id == dep_id).first()
         if not dep:
-            raise HTTPException(f"Dependency {dep_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Dependency {dep_id} not found",
+            )
 
         return DependencyResponse(
             id=dep.id,
