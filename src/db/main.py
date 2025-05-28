@@ -1,16 +1,24 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.app_constants import DATABASE_URL
+
+
+# set for sqlite to have foreign key on
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, _):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 # SQLAlchemy setup
-DATABASE_URL = "sqlite:///vulnerability_tracker.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Initialize databas
-def create_db():
-    Base.metadata.create_all(bind=engine)
 
 # Helper functions
 def get_db() -> Session:

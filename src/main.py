@@ -7,10 +7,13 @@ from src.logging_utils import logger
 from src.redis_utils import aioredis, redis_client, redis_pool
 from src.applications.routes import application_router
 from src.dependencies.routes import dependency_router
-from src.db.main import create_db
+from src.users.routes import user_router
+
+from src.app_constants import API_VERSION
+from src.init_sqlite_db import create_db, create_default_user
 
 
-version = "v1"
+version = API_VERSION
 
 description = """
 A REST API  for Python Application Vulnerability Tracking.
@@ -25,6 +28,7 @@ This REST API is able to;
 version_prefix = f"/api/{version}"
 
 create_db()
+create_default_user()
 logger.info("sqllite db tables created")
 
 @asynccontextmanager
@@ -74,6 +78,9 @@ app.include_router(
 )
 app.include_router(
     dependency_router, prefix=f"{version_prefix}/dependencies", tags=["dependencies"]
+)
+app.include_router(
+    user_router, prefix=f"{version_prefix}/users", tags=["users"]
 )
 
 @app.exception_handler(Exception)
