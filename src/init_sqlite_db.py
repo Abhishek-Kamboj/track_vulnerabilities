@@ -28,7 +28,10 @@ def create_default_user():
         db_session.close()
 
 
-# Initialize database
+
 def create_db():
+    """
+    Initialize database
+    """
     Base.metadata.create_all(bind=engine)
     create_default_user()

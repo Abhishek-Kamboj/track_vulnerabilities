@@ -9,10 +9,10 @@ class ApplicationCreate(BaseModel):
     user_id: str
     description: Optional[str] = None
 
-    @field_validator('name')
+    @field_validator("name")
     def check_trimmed_length(cls, v: str) -> str:
         if len(v.strip()) == 0:
-            raise ValueError('Name cannot be empty')
+            raise ValueError("Name cannot be empty")
         return v.strip()
 
     @field_validator("user_id")
@@ -20,6 +20,8 @@ class ApplicationCreate(BaseModel):
         if not v.strip():
             raise ValueError("user_id cannot be empty")
         return v.strip()
+
+
 class ApplicationsGet(BaseModel):
     user_id: str
 
@@ -29,14 +31,16 @@ class ApplicationsGet(BaseModel):
             raise ValueError("user_id cannot be empty")
         return v.strip()
 
+
 class ApplicationGet(BaseModel):
     name: str
 
-    @field_validator('name')
+    @field_validator("name")
     def check_trimmed_length(cls, v: str) -> str:
         if len(v.strip()) == 0:
-            raise ValueError('Name cannot be empty')
+            raise ValueError("Name cannot be empty")
         return v.strip()
+
 
 class ApplicationResponse(BaseModel):
     name: str

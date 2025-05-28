@@ -74,22 +74,17 @@ class ApplicationService:
     ) -> ApplicationResponse:
         """
         Create a new application with dependencies and check for vulnerabilities.
-        - Parses dependencies from `file_content` using `parse_requirements`.
-        - Fetches vulnerabilities for each dependency using `_fetch_vulnerabilities` with Redis.
-        - Stores dependencies in the database, linking them to the new application.
-        - Sets `is_vulnerable` on the application based on detected vulnerabilities.
-        - Commits changes to the database or rolls back on error.
+        vulnerabilities for each dependency is retrieved from external service and stored in cache
+        so that next time it is retrieved from cache instead of hitting external service.
 
         Args:
-            self: The instance of the class containing this method.
             name (str): The name of the application.
             description (Optional[str]): An optional description of the application.
-            file_content (str): The content of a requirements.txt file containing dependencies.
-            db_session (Session): The database session for SQLAlchemy operations.
+            file_content (str): The content of a requirements.txt.
+            db_session (Session): The database session.
             redis_client (redis.Redis): The Redis client.
 
-        Returns:
-            Application: The created application object with associated dependencies.
+        Returns: ApplicationResponse object.
 
         Raises:
             HTTPException:
@@ -112,17 +107,18 @@ class ApplicationService:
             )
         try:
             deps = parse_requirements(file_content)
-        except UnicodeDecodeError:
+        except Exception as e:
+            logger.debug(f"Following error occured while parsing text file {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid requirements.txt file",
+                detail="Cannot parse requirements.txt file",
             )
 
         vulnerabilities = []
         # first create application
         new_app = Application(
             name=name,
-            user_id= user_id,
+            user_id=user_id,
             description=description,
             is_vulnerable=False,
             created_at=datetime.now(),
@@ -179,6 +175,21 @@ class ApplicationService:
     async def delete_application(
         self, app_name: str, db_session: Session, redis_client: Redis
     ):
+        """
+        Deletes an application from the database and removes its associated cache entry.
+
+        Args:
+            app_name (str): The name of the application to be deleted.
+            db_session (Session): The database session.
+            redis_client (Redis): The Redis client instance.
+
+        Raises:
+            HTTPException:
+                - 404 if the application does not exist.
+                - 500 if there is an error during deletion.
+
+        Returns dict: An empty dictionary indicating successful deletion.
+        """
         cache_key = self.app_cache_key.format(app_name)
         app = db_session.query(Application).filter(Application.name == app_name).first()
         if not app:
@@ -193,11 +204,29 @@ class ApplicationService:
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error deleting application: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to delete application")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete application",
+            )
 
     async def get_application(
         self, app_name: str, db_session: Session, redis_client: Redis
     ) -> ApplicationResponse:
+        """
+        Get an application from the database or cache.
+
+        Args:
+            app_name (str): The name of the application to retrieve.
+            db_session (Session): The database session.
+            redis_client (Redis): The Redis client instance.
+
+        Returns: ApplicationResponse
+
+        Raises:
+            HTTPException:
+                - 404 if the application is not found in the database.
+                - 500 if there is a Redis-related error.
+        """
         cache_key = self.app_cache_key.format(app_name)
 
         try:
@@ -229,8 +258,12 @@ class ApplicationService:
 
             return app_response
 
-    async def get_applications(self,user_id: str, db_session: Session)-> ApplicationResponse:
-        apps: List[Application] = db_session.query(Application).filter(Application.user_id == user_id).all()
+    async def get_applications(
+        self, user_id: str, db_session: Session
+    ) -> ApplicationResponse:
+        apps: List[Application] = (
+            db_session.query(Application).filter(Application.user_id == user_id).all()
+        )
         return [
             ApplicationResponse(
                 name=app.name,

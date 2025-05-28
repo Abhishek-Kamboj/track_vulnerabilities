@@ -9,14 +9,12 @@ from src.app_constants import MAX_FILE_SIZE_BYTES
 from src.applications.schemas import ApplicationCreate, ApplicationResponse
 from src.applications.services import ApplicationService, get_application_service
 from src.db.main import get_db
-from src.db.models import Application
 from src.logging_utils import logger
 from src.redis_utils import get_redis
 
 application_router = APIRouter()
 
 
-# Application Endpoints
 @application_router.post(
     "/",
     status_code=status.HTTP_201_CREATED,
@@ -117,7 +115,10 @@ async def get_applications(
         return await appl_service.get_applications(user_id, db_session)
     except Exception as e:
         logger.error(f"Error retrieving applications: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve applications")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve applications",
+        )
 
 
 @application_router.get("/{app_name}", response_model=List[ApplicationResponse])
@@ -140,4 +141,7 @@ async def get_application(
         return await appl_service.get_application(app_name, db_session, redis_client)
     except Exception as e:
         logger.error(f"Error retrieving applications: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve application")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve application",
+        )

@@ -13,65 +13,87 @@ class DependencyService:
     async def get_application_dependencies(
         self, app_name: str, db_session: Session
     ) -> List[DependencyResponse]:
-        try:
-            app = (
-                db_session.query(Application)
-                .filter(Application.name == app_name)
-                .first()
-            )
-            if not app:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Application not found",
-                )
+        """
+        Get the dependencies of a specified application.
 
-            return [
-                DependencyResponse(
-                    id=dep.id,
-                    name=dep.name,
-                    version=dep.version,
-                    applications=[app.name for app in dep.applications],
-                    vulnerabilities=json.loads(dep.vulnerabilities),
-                )
-                for dep in app.dependencies
-            ]
-        except Exception as e:
-            logger.error(f"Error retrieving application dependencies: {str(e)}")
+        Args:
+            app_name (str): The name of the application whose dependencies are being fetched.
+            db_session (Session): The database session.
+
+        Returns: List[DependencyResponse]
+
+        Raises:
+            HTTPException:
+                - 404 if the specified application is not found in the database
+        """
+        app = db_session.query(Application).filter(Application.name == app_name).first()
+        if not app:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve dependencies",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Application {app_name} not found",
             )
 
-    async def get_dependency(
-        self, dep_id: str, db_session: Session
-    ) -> DependencyResponse:
-        """
-        Get details for a specific dependency.
-        """
-        try:
-            dep = db_session.query(Dependency).filter(Dependency.id == dep_id).first()
-            if not dep:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Dependency not found"
-                )
-            return DependencyResponse(
+        return [
+            DependencyResponse(
                 id=dep.id,
                 name=dep.name,
                 version=dep.version,
                 applications=[app.name for app in dep.applications],
                 vulnerabilities=json.loads(dep.vulnerabilities),
             )
-        except Exception as e:
-            logger.error(f"Error retrieving dependency {dep_id} : {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve dependency",
-            )
+            for dep in app.dependencies
+        ]
 
-    async def get_dependency_by_user(self, user_id: str, db_session: Session):
+    async def get_dependency(
+        self, dep_id: str, db_session: Session
+    ) -> DependencyResponse:
+        """
+        Get details of a specific dependency by its ID.
+
+        Args:
+            dep_id (str): The unique identifier of the dependency to retrieve.
+            db_session (Session): The database session used for querying the dependency.
+
+        Returns: DependencyResponse
+
+        Raises:
+            HTTPException:
+                - 404 if the dependency is not found.
+        """
+        dep = db_session.query(Dependency).filter(Dependency.id == dep_id).first()
+        if not dep:
+            raise HTTPException(f"Dependency {dep_id} not found")
+
+        return DependencyResponse(
+            id=dep.id,
+            name=dep.name,
+            version=dep.version,
+            applications=[app.name for app in dep.applications],
+            vulnerabilities=json.loads(dep.vulnerabilities),
+        )
+
+    async def get_dependency_by_user(
+        self, user_id: str, db_session: Session
+    ) -> List[DependencyResponse]:
+        """
+        Get all unique dependencies associated with a given user.
+
+        Args:
+            user_id (str): The unique identifier of the user whose dependencies are to be retrieved.
+            db_session (Session): The database session used for querying user and dependency information.
+
+        Returns:  List[DependencyResponse]
+
+        Raises:
+            HTTPException:
+                - 404 if the user is not found in the database.
+        """
         user: User = db_session.query(User).filter(User.id == user_id).first()
         if not user:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found",
+            )
 
         # Collect unique dependencies across all applications
         unique_dependencies: Set[Dependency] = set()
@@ -79,15 +101,14 @@ class DependencyService:
             for dep in app.dependencies:  # lazy-loaded
                 unique_dependencies.add(dep)
 
-        # Convert to DependencyResponse format
         return [
-            {
-                "id": dep.id,
-                "name": dep.name,
-                "version": dep.version,
-                "applications": [app.name for app in dep.applications],  # lazy-loaded
-                "vulnerabilities": json.loads(dep.vulnerabilities),
-            }
+            DependencyResponse(
+                id=dep.id,
+                name=dep.name,
+                version=dep.version,
+                applications=[app.name for app in dep.applications],  # lazy-loaded
+                vulnerabilities=json.loads(dep.vulnerabilities),
+            )
             for dep in unique_dependencies
         ]
 

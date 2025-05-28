@@ -1,13 +1,11 @@
-from typing import List, Set
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from src.db.main import get_db
-from src.db.models import Dependency, User
 from src.dependencies.schemas import DependencyResponse
 from src.dependencies.services import DependencyService, get_dependency_service
-from src.logging_utils import logger
 
 dependency_router = APIRouter()
 

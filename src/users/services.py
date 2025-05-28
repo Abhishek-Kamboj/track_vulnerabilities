@@ -1,11 +1,9 @@
-import json
-from typing import List, Set
 from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.db.models import Application, Dependency, User
+from src.db.models import Application, User
 from src.dependencies.schemas import DependencyResponse
 from src.users.schemas import UserResponse
 from src.logging_utils import logger
@@ -17,7 +15,21 @@ class UserService:
         self, user_id: str, db_session: Session
     ) -> DependencyResponse:
         """
-        Get details for a specific dependency.
+        Creates a new user in the database.
+
+        This function checks if the given user ID already exists in the database.
+        If the user does not exist, it creates a new user entry and commits the transaction.
+
+        Args:
+            user_id (str): The unique identifier for the new user.
+            db_session (Session): The database session .
+
+        Returns: UserResponse
+
+        Raises:
+            HTTPException:
+                - 422 if the user already exists.
+                - 500 if there is an error during creation.
         """
         # Check if the user exists
         existing_user = db_session.query(User).filter(User.id == user_id).first()
@@ -44,46 +56,55 @@ class UserService:
             )
 
     async def delete_user(self, user_id: str, db_session: Session):
+        """
+        Deletes a user from the database while handling special cases.
+
+        This function checks if the user exists, ensures the default user cannot be deleted,
+        and reassigns the user's applications before deletion.
+
+        Args:
+            user_id (str): The unique identifier of the user to be deleted.
+            db_session (Session): The database session.
+
+        Returns:
+            dict: An empty dictionary indicating successful deletion.
+
+        Raises:
+            HTTPException:
+                - 404 if the user does not exist.
+                - 400 if attempting to delete the default user.
+        """
         default_user_id = DEFAULT_USER_ID
-        try:
-            # Check if the user exists
-            user = db_session.query(User).filter(User.id == user_id).first()
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"User {user_id} not found",
-                )
 
-            # Prevent deleting the default user
-            if user_id == default_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot delete the default user",
-                )
-
-            # Check if the default user exists
-            default_user = (
-                db_session.query(User).filter(User.id == default_user_id).first()
-            )
-            if not default_user:
-                raise Exception(" Default user doesnt exist in DB")
-
-            # Reassign applications to the default user
-            db_session.query(Application).filter(Application.user_id == user_id).update(
-                {Application.user_id: default_user_id}
+        # Check if the user exists
+        user = db_session.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found",
             )
 
-            # Delete the user
-            db_session.delete(user)
-            db_session.commit()
-            return {}
-        except HTTPException as e:
-            db_session.rollback()
-            raise e
-        except Exception as e:
-            db_session.rollback()
-            logger.error(f"Error deleting user: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to delete user")
+        # Prevent deleting the default user
+        if user_id == default_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete the default user",
+            )
+
+        # Check if the default user exists
+        default_user = db_session.query(User).filter(User.id == default_user_id).first()
+        if not default_user:
+            raise Exception(" Default user doesnt exist in DB")
+
+        # Reassign applications to the default user
+        db_session.query(Application).filter(Application.user_id == user_id).update(
+            {Application.user_id: default_user_id}
+        )
+
+        # Delete the user
+        db_session.delete(user)
+        db_session.commit()
+        return {}
 
 
 user_service = UserService()
