@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_PORT=8000
+      - REDIS_HOST=redis  # Set Redis hostname
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # un comment to override the command in docker file
+    # command: ["/bin/bash"]  # Runs Bash instead of the default CMD
+    # stdin_open: true    # Equivalent to -i (Keep STDIN open)
+    # tty: true           # Equivalent to -t (Allocate a pseudo-TTY)
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"  # Optional, for external access
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
