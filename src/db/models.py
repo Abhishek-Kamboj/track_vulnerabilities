@@ -6,7 +6,7 @@ from sqlalchemy.sql import func
 
 from src.db.main import Base
 
-app_dependencies = Table(
+app_dependencies: Table = Table(
     "app_dependencies",
     Base.metadata,
     Column(
@@ -25,7 +25,9 @@ class Application(Base):
     description = Column(Text, nullable=True)
     is_vulnerable = Column(Boolean, nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
-    user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    user_id = Column(
+        String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
     user: Mapped["User"] = relationship("User", back_populates="applications")
     dependencies: Mapped[List["Dependency"]] = relationship(
         "Dependency", secondary=app_dependencies, back_populates="applications"

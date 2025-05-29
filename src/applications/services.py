@@ -7,6 +7,7 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException, status
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from src.app_constants import ECO_SYSTEM, OSV_SERVICE_URL
 from src.applications.schemas import ApplicationResponse
@@ -51,7 +52,7 @@ class ApplicationService:
                         vulns = data.get("vulns", [])
                         # update redis cache here
                         # no need to set expiry value, a vulnerability associated with a
-                        # library of a particular version never changes
+                        # library of a particular version never changes (assumption)
                         await redis_client.set(cache_key, json.dumps(vulns))
                         return vulns
                     return []
@@ -106,7 +107,7 @@ class ApplicationService:
                 detail="App already exists",
             )
         try:
-            deps = parse_requirements(file_content)
+            deps: List[Dict[str, str]] = parse_requirements(file_content)
         except Exception as e:
             logger.debug(f"Following error occured while parsing text file {str(e)}")
             raise HTTPException(
@@ -137,34 +138,55 @@ class ApplicationService:
                     db_session.query(Dependency).filter(Dependency.id == dep_id).first()
                 )
                 if not existing_dep:
-                    new_dep = Dependency(
-                        id=dep_id,
-                        name=dep["name"],
-                        version=dep["version"],
-                        vulnerabilities=json.dumps(vulns),
-                    )
-                    new_dep.applications.append(new_app)
-                    db_session.add(new_dep)
+                    # add try catch here to handle concurrency issue with sqlite database
+                    # this is needed only for sqlite
+                    try:
+                        new_dep = Dependency(
+                            id=dep_id,
+                            name=dep["name"],
+                            version=dep["version"],
+                            vulnerabilities=json.dumps(vulns),
+                        )
+                        new_dep.applications.append(new_app)
+                        db_session.add(new_dep)
+                        db_session.flush()  # try to update database with new dependency
+                    except IntegrityError:
+                        db_session.rollback()
+                        existing_dep = (
+                            db_session.query(Dependency)
+                            .filter(Dependency.id == dep_id)
+                            .first()
+                        )
+                        if not existing_dep:
+                            raise HTTPException(
+                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="failed to insert new dependency into table",
+                            )
+                        existing_dep.applications.append(new_app)
                 else:
                     existing_dep.applications.append(new_app)
+
+                return vulnerabilities
             # update vulnerability status, now that all the dependencies have been added.
             new_app.is_vulnerable = len(vulnerabilities) > 0
             db_session.add(new_app)
             db_session.commit()
             db_session.refresh(new_app)
-
             app_response = ApplicationResponse(
                 name=new_app.name,
                 description=new_app.description,
                 is_vulnerable=new_app.is_vulnerable,
                 created_at=new_app.created_at,
-                user_id=new_app.user_id
+                user_id=new_app.user_id,
             )
             cache_key = self.app_cache_key.format(new_app.name)
             await set_cache_ttl(
                 cache_key, app_response.model_dump_json(), redis_client, 30
             )
             return app_response
+        except HTTPException as e:
+            db_session.rollback()
+            raise e
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error creating application: {str(e)}")
@@ -252,7 +274,7 @@ class ApplicationService:
                 description=app.description,
                 is_vulnerable=app.is_vulnerable,
                 created_at=app.created_at,
-                user_id=app.user_id
+                user_id=app.user_id,
             )
             await set_cache_ttl(
                 cache_key, app_response.model_dump_json(), redis_client, 30
@@ -272,7 +294,7 @@ class ApplicationService:
                 description=app.description,
                 is_vulnerable=app.is_vulnerable,
                 created_at=app.created_at,
-                user_id=app.user_id
+                user_id=app.user_id,
             )
             for app in apps
         ]
