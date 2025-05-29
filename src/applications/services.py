@@ -166,7 +166,6 @@ class ApplicationService:
                 else:
                     existing_dep.applications.append(new_app)
 
-                return vulnerabilities
             # update vulnerability status, now that all the dependencies have been added.
             new_app.is_vulnerable = len(vulnerabilities) > 0
             db_session.add(new_app)

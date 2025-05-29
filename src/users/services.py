@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from src.db.models import Application, User
 from src.dependencies.schemas import DependencyResponse
@@ -102,8 +103,16 @@ class UserService:
         )
 
         # Delete the user
-        db_session.delete(user)
-        db_session.commit()
+        # add try catch here to handle concurrency issue with sqlite database
+        # this is needed only for sqlite
+        try:
+            db_session.delete(user)
+            db_session.commit()
+        except IntegrityError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found",
+            )
         return {}
 
 
