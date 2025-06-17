@@ -5,7 +5,7 @@ from src.logging_utils import logger
 
 def convert_to_int(variable_name: str, default: int):
     try:
-        return int(os.getenv("MAX_FILE_SIZE_BYTES", default))
+        return int(os.getenv(variable_name, default))
     except:
         logger.warning(
             f"Error converting value from environment variable {variable_name} to int, falling back on default{default}"
